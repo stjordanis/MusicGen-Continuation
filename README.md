@@ -1,5 +1,5 @@
 ---
-title: MusicGen
+title: MusicGen Continuation
 python_version: '3.9'
 tags:
 - music generation

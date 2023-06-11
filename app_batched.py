@@ -9,6 +9,8 @@ LICENSE file in the root directory of this source tree.
 from tempfile import NamedTemporaryFile
 import torch
 import gradio as gr
+from share_btn import community_icon_html, loading_icon_html, share_js, css
+
 from audiocraft.data.audio_utils import convert_audio
 from audiocraft.data.audio import audio_write
 from audiocraft.models import MusicGen
@@ -39,10 +41,13 @@ def predict(texts, melodies):
         if melody is None:
             processed_melodies.append(None)
         else:
-            sr, melody = melody[0], torch.from_numpy(melody[1]).to(MODEL.device).float().t()
+            sr, melody = (
+                melody[0],
+                torch.from_numpy(melody[1]).to(MODEL.device).float().t(),
+            )
             if melody.dim() == 1:
                 melody = melody[None]
-            melody = melody[..., :int(sr * duration)]
+            melody = melody[..., : int(sr * duration)]
             melody = convert_audio(melody, sr, target_sr, target_ac)
             processed_melodies.append(melody)
 
@@ -50,7 +55,7 @@ def predict(texts, melodies):
         descriptions=texts,
         melody_wavs=processed_melodies,
         melody_sample_rate=target_sr,
-        progress=False
+        progress=False,
     )
 
     outputs = outputs.detach().cpu().float()
@@ -58,14 +63,25 @@ def predict(texts, melodies):
     for output in outputs:
         with NamedTemporaryFile("wb", suffix=".wav", delete=False) as file:
             audio_write(
-                file.name, output, MODEL.sample_rate, strategy="loudness",
-                loudness_headroom_db=16, loudness_compressor=True, add_suffix=False)
+                file.name,
+                output,
+                MODEL.sample_rate,
+                strategy="loudness",
+                add_suffix=False,
+            )
             waveform_video = gr.make_waveform(file.name)
             out_files.append(waveform_video)
-    return [out_files]
+    return [out_files, melodies]
 
 
-with gr.Blocks() as demo:
+def toggle(choice):
+    if choice == "mic":
+        return gr.update(source="microphone", value=None, label="Microphone")
+    else:
+        return gr.update(source="upload", value=None, label="File")
+
+
+with gr.Blocks(css=css) as demo:
     gr.Markdown(
         """
         # MusicGen
@@ -81,13 +97,56 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column():
             with gr.Row():
-                text = gr.Text(label="Describe your music", lines=2, interactive=True)
-                melody = gr.Audio(source="upload", type="numpy", label="Condition on a melody (optional)", interactive=True)
+                text = gr.Text(
+                    label="Describe your music",
+                    lines=2,
+                    interactive=True,
+                    elem_id="text-input",
+                )
+                with gr.Column():
+                    radio = gr.Radio(
+                        ["file", "mic"],
+                        value="file",
+                        label="Melody Condition (optional) File or Mic",
+                    )
+                    melody = gr.Audio(
+                        source="upload",
+                        type="numpy",
+                        label="File",
+                        interactive=True,
+                        elem_id="melody-input",
+                    )
             with gr.Row():
                 submit = gr.Button("Generate")
         with gr.Column():
-            output = gr.Video(label="Generated Music")
-    submit.click(predict, inputs=[text, melody], outputs=[output], batch=True, max_batch_size=12)
+            output = gr.Video(label="Generated Music", elem_id="generated-video")
+            output_melody = gr.Audio(label="Melody ", elem_id="melody-output")
+            with gr.Row(visible=False) as share_row:
+                with gr.Group(elem_id="share-btn-container"):
+                    community_icon = gr.HTML(community_icon_html)
+                    loading_icon = gr.HTML(loading_icon_html)
+                    share_button = gr.Button("Share to community", elem_id="share-btn")
+                    share_button.click(None, [], [], _js=share_js)
+    submit.click(
+        lambda x: gr.update(visible=False),
+        None,
+        [share_row],
+        queue=False,
+        show_progress=False,
+    ).then(
+        predict,
+        inputs=[text, melody],
+        outputs=[output, output_melody],
+        batch=True,
+        max_batch_size=12,
+    ).then(
+        lambda x: gr.update(visible=True),
+        None,
+        [share_row],
+        queue=False,
+        show_progress=False,
+    )
+    radio.change(toggle, radio, [melody], queue=False, show_progress=False)
     gr.Examples(
         fn=predict,
         examples=[
@@ -113,9 +172,10 @@ with gr.Blocks() as demo:
             ],
         ],
         inputs=[text, melody],
-        outputs=[output]
+        outputs=[output],
     )
-    gr.Markdown("""
+    gr.Markdown(
+        """
     ### More details
 
     The model will generate 12 seconds of audio based on the description you provided.
@@ -127,6 +187,7 @@ with gr.Blocks() as demo:
 
     See [github.com/facebookresearch/audiocraft](https://github.com/facebookresearch/audiocraft)
     for more details.
-    """)
+    """
+    )
 
-demo.queue(max_size=60).launch()
+demo.queue(max_size=15).launch()
