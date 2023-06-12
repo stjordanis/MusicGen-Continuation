@@ -281,7 +281,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--listen",
         type=str,
-        default="127.0.0.1",
+        default="0.0.0.0",
         help="IP to listen on for connections to Gradio",
     )
     parser.add_argument(
@@ -293,7 +293,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--server_port",
         type=int,
-        default=0,
+        default=7860,
         help="Port to run the server listener on",
     )
     parser.add_argument("--inbrowser", action="store_true", help="Open in browser")
