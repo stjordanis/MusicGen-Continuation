@@ -58,9 +58,6 @@ def predict(
 
     if melody_input:
         melody, sr = torchaudio.load(melody_input)
-        melody_duration = melody.shape[-1] / sr
-        if melody_duration < duration:
-            raise gr.Error("The duration must be greater than the melody duration!")
         # sr, melody = melody_input[0], torch.from_numpy(melody_input[1]).to(MODEL.device).float().t().unsqueeze(0)
         if melody.dim() == 2:
             melody = melody[None]
@@ -69,6 +66,9 @@ def predict(
             melody_wavform = melody[
                 ..., int(sr * continuation_start) : int(sr * continuation_end)
             ]
+            melody_duration = melody_wavform.shape[-1] / sr
+            if duration + melody_duration > MODEL.lm.cfg.dataset.segment_duration:
+                raise gr.Error("Duration + continuation duration must be <= 30 seconds")
             output = MODEL.generate_continuation(
                 prompt=melody_wavform,
                 prompt_sample_rate=sr,
