@@ -67,10 +67,13 @@ def predict(texts, melodies):
                 output,
                 MODEL.sample_rate,
                 strategy="loudness",
+                loudness_headroom_db=16,
+                loudness_compressor=True,
                 add_suffix=False,
             )
             waveform_video = gr.make_waveform(file.name)
             out_files.append(waveform_video)
+
     return [out_files, melodies]
 
 
@@ -189,5 +192,4 @@ with gr.Blocks(css=css) as demo:
     for more details.
     """
     )
-
-demo.queue(max_size=15).launch()
+demo.queue(max_size=60).launch()

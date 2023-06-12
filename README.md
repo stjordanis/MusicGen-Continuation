@@ -5,7 +5,7 @@ tags:
 - music generation
 - language models
 - LLMs
-app_file: app_batched.py
+app_file: app.py
 emoji: 🎵
 colorFrom: white
 colorTo: blue
