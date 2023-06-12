@@ -18,7 +18,6 @@ from audiocraft.data.audio import audio_write
 from share_btn import community_icon_html, loading_icon_html, share_js, css
 
 MODEL = None
-IS_SHARED_SPACE = "radames/MusicGen-Continuation" in os.environ.get("SPACE_ID", "")
 
 
 def load_model(version):
@@ -30,7 +29,6 @@ def predict(
     text,
     melody_input,
     duration=30,
-    continuation=False,
     continuation_start=0,
     continuation_end=30,
     topk=250,
@@ -42,10 +40,13 @@ def predict(
     topk = int(topk)
     if MODEL is None:
         MODEL = load_model("melody")
+    
+    if melody_input is None:
+        raise gr.Error("Please upload a melody to continue!")
 
     if duration > MODEL.lm.cfg.dataset.segment_duration:
         raise gr.Error("MusicGen currently supports durations of up to 30 seconds!")
-    if continuation and continuation_end < continuation_start:
+    if continuation_end < continuation_start:
         raise gr.Error("The end time must be greater than the start time!")
     MODEL.set_generation_params(
         use_sampling=True,
@@ -61,34 +62,19 @@ def predict(
         # sr, melody = melody_input[0], torch.from_numpy(melody_input[1]).to(MODEL.device).float().t().unsqueeze(0)
         if melody.dim() == 2:
             melody = melody[None]
-        if continuation:
-            print("\nGenerating continuation\n")
-            melody_wavform = melody[
-                ..., int(sr * continuation_start) : int(sr * continuation_end)
-            ]
-            melody_duration = melody_wavform.shape[-1] / sr
-            if duration + melody_duration > MODEL.lm.cfg.dataset.segment_duration:
-                raise gr.Error("Duration + continuation duration must be <= 30 seconds")
-            output = MODEL.generate_continuation(
-                prompt=melody_wavform,
-                prompt_sample_rate=sr,
-                descriptions=[text],
-                progress=True,
-            )
-        else:
-            print("\nGenerating with melody\n")
-            melody_wavform = melody[
-                ..., : int(sr * MODEL.lm.cfg.dataset.segment_duration)
-            ]
-            output = MODEL.generate_with_chroma(
-                descriptions=[text],
-                melody_wavs=melody_wavform,
-                melody_sample_rate=sr,
-                progress=True,
-            )
-    else:
-        print("\nGenerating without melody\n")
-        output = MODEL.generate(descriptions=[text], progress=False)
+        print("\nGenerating continuation\n")
+        melody_wavform = melody[
+            ..., int(sr * continuation_start) : int(sr * continuation_end)
+        ]
+        melody_duration = melody_wavform.shape[-1] / sr
+        if duration + melody_duration > MODEL.lm.cfg.dataset.segment_duration:
+            raise gr.Error("Duration + continuation duration must be <= 30 seconds")
+        output = MODEL.generate_continuation(
+            prompt=melody_wavform,
+            prompt_sample_rate=sr,
+            descriptions=[text],
+            progress=True,
+        )
 
     output = output.detach().cpu().float()[0]
     with NamedTemporaryFile("wb", suffix=".wav", delete=False) as file:
@@ -150,20 +136,19 @@ def ui(**kwargs):
         gr.Markdown(
             """
             # MusicGen Continuation
-            This is your private demo for [MusicGen](https://github.com/facebookresearch/audiocraft), a simple and controllable model for music generation
+            This a [MusicGen](https://github.com/facebookresearch/audiocraft), a simple and controllable model for music generation
             presented at: ["Simple and Controllable Music Generation"](https://huggingface.co/papers/2306.05284)
+
+            This Spaces only does melody continuation, you can try other features [here](https://huggingface.co/spaces/facebook/MusicGen)
             """
         )
-        if IS_SHARED_SPACE:
-            gr.Markdown(
-                """
-                ⚠ This Space doesn't work in this shared UI ⚠
-
+        gr.Markdown(
+            """
                 <a href="https://huggingface.co/spaces/radames/MusicGen-Continuation?duplicate=true" style="display: inline-block;margin-top: .5em;margin-right: .25em;" target="_blank">
                 <img style="margin-bottom: 0em;display: inline;margin-top: -.25em;" src="https://bit.ly/3gLdBN6" alt="Duplicate Space"></a>
-                to use it privately, or use the <a href="https://huggingface.co/spaces/facebook/MusicGen">public demo</a>
+                to use it privately
                 """
-            )
+        )
         with gr.Row():
             with gr.Column():
                 with gr.Row():
@@ -177,7 +162,8 @@ def ui(**kwargs):
                         radio = gr.Radio(
                             ["file", "mic"],
                             value="file",
-                            label="Melody Condition (optional) File or Mic",
+                            label="Melody Inital Condition File or Mic",
+                            info="Make sure the audio is no longer than total generation duration which is max 30 seconds, you can trim the audio in the next section",
                         )
                         melody = gr.Audio(
                             source="upload",
@@ -188,46 +174,38 @@ def ui(**kwargs):
                         )
                 with gr.Row():
                     submit = gr.Button("Submit")
-                # with gr.Row():
-                #     model = gr.Radio(
-                #         ["melody", "medium", "small", "large"],
-                #         label="Model",
-                #         value="melody",
-                #         interactive=True,
-                #     )
                 with gr.Row():
                     duration = gr.Slider(
                         minimum=1,
                         maximum=30,
                         value=10,
-                        label="Total Duration",
+                        label="Total Generation Duration",
                         interactive=True,
                     )
-                with gr.Row():
-                    continuation = gr.Checkbox(value=False, label="Enable Continuation")
-                with gr.Row():
-                    continuation_start = gr.Slider(
-                        minimum=0,
-                        maximum=30,
-                        step=0.01,
-                        value=0,
-                        label="melody cut start",
-                        interactive=True,
-                    )
-                    continuation_end = gr.Slider(
-                        minimum=0,
-                        maximum=30,
-                        step=0.01,
-                        value=0,
-                        label="melody cut end",
-                        interactive=True,
-                    )
-                    cut_btn = gr.Button("Cut Melody").style(full_width=False)
-                with gr.Row():
-                    preview_cut = gr.Audio(
-                        type="numpy",
-                        label="Cut Preview",
-                    )
+                with gr.Accordion(label="Input Melody Trimming (optional)", open=False):
+                    with gr.Row():
+                        continuation_start = gr.Slider(
+                            minimum=0,
+                            maximum=30,
+                            step=0.01,
+                            value=0,
+                            label="melody cut start",
+                            interactive=True,
+                        )
+                        continuation_end = gr.Slider(
+                            minimum=0,
+                            maximum=30,
+                            step=0.01,
+                            value=0,
+                            label="melody cut end",
+                            interactive=True,
+                        )
+                        cut_btn = gr.Button("Cut Melody").style(full_width=False)
+                    with gr.Row():
+                        preview_cut = gr.Audio(
+                            type="numpy",
+                            label="Cut Preview",
+                        )
                 with gr.Accordion(label="Advanced Settings", open=False):
                     with gr.Row():
                         topk = gr.Number(label="Top-k", value=250, interactive=True)
@@ -276,7 +254,6 @@ def ui(**kwargs):
                 text,
                 melody,
                 duration,
-                continuation,
                 continuation_start,
                 continuation_end,
                 topk,
