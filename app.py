@@ -27,7 +27,16 @@ def load_model(version):
 
 
 def predict(
-    text, melody_input, duration, continuation, topk, topp, temperature, cfg_coef
+    text,
+    melody_input,
+    duration=30,
+    continuation=False,
+    continuation_start=0,
+    continuation_end=30,
+    topk=250,
+    topp=0,
+    temperature=1,
+    cfg_coef=3,
 ):
     global MODEL
     topk = int(topk)
@@ -36,8 +45,8 @@ def predict(
 
     if duration > MODEL.lm.cfg.dataset.segment_duration:
         raise gr.Error("MusicGen currently supports durations of up to 30 seconds!")
-    if continuation >= duration:
-        raise gr.Error("The continuation setting can't be higher or equal to duration!")
+    if continuation and continuation_end < continuation_start:
+        raise gr.Error("The end time must be greater than the start time!")
     MODEL.set_generation_params(
         use_sampling=True,
         top_k=topk,
@@ -49,18 +58,25 @@ def predict(
 
     if melody_input:
         melody, sr = torchaudio.load(melody_input)
+        melody_duration = melody.shape[-1] / sr
+        if melody_duration < duration:
+            raise gr.Error("The duration must be greater than the melody duration!")
         # sr, melody = melody_input[0], torch.from_numpy(melody_input[1]).to(MODEL.device).float().t().unsqueeze(0)
         if melody.dim() == 2:
             melody = melody[None]
         if continuation:
-            prompt_waveform = melody[..., -int(sr * continuation) :]
+            print("\nGenerating continuation\n")
+            melody_wavform = melody[
+                ..., int(sr * continuation_start) : int(sr * continuation_end)
+            ]
             output = MODEL.generate_continuation(
-                prompt=prompt_waveform,
+                prompt=melody_wavform,
                 prompt_sample_rate=sr,
                 descriptions=[text],
                 progress=True,
             )
         else:
+            print("\nGenerating with melody\n")
             melody_wavform = melody[
                 ..., : int(sr * MODEL.lm.cfg.dataset.segment_duration)
             ]
@@ -71,6 +87,7 @@ def predict(
                 progress=True,
             )
     else:
+        print("\nGenerating without melody\n")
         output = MODEL.generate(descriptions=[text], progress=False)
 
     output = output.detach().cpu().float()[0]
@@ -85,7 +102,11 @@ def predict(
             add_suffix=False,
         )
         waveform_video = gr.make_waveform(file.name)
-    return waveform_video, melody_input
+
+    return (
+        waveform_video,
+        (sr, melody_wavform.numpy()) if melody_input else None,
+    )
 
 
 def ui(**kwargs):
@@ -95,10 +116,40 @@ def ui(**kwargs):
         else:
             return gr.update(source="upload", value=None, label="File")
 
+    def check_melody_length(melody_input):
+        if not melody_input:
+            return gr.update(maximum=0, value=0), gr.update(maximum=0, value=0)
+        melody, sr = torchaudio.load(melody_input)
+        audio_length = melody.shape[-1] / sr
+        if melody.dim() == 2:
+            melody = melody[None]
+        return gr.update(maximum=audio_length, value=0), gr.update(
+            maximum=audio_length, value=audio_length
+        )
+
+    def preview_melody_cut(melody_input, continuation_start, continuation_end):
+        if not melody_input:
+            return gr.update(maximum=0, value=0), gr.update(maximum=0, value=0)
+        melody, sr = torchaudio.load(melody_input)
+        audio_length = melody.shape[-1] / sr
+        if melody.dim() == 2:
+            melody = melody[None]
+
+        if continuation_end < continuation_start:
+            raise gr.Error("The end time must be greater than the start time!")
+        if continuation_start < 0 or continuation_end > audio_length:
+            raise gr.Error("The continuation settings must be within the audio length!")
+        print("cutting", int(sr * continuation_start), int(sr * continuation_end))
+        prompt_waveform = melody[
+            ..., int(sr * continuation_start) : int(sr * continuation_end)
+        ]
+
+        return (sr, prompt_waveform.numpy())
+
     with gr.Blocks(css=css) as interface:
         gr.Markdown(
             """
-            # MusicGen
+            # MusicGen Continuation
             This is your private demo for [MusicGen](https://github.com/facebookresearch/audiocraft), a simple and controllable model for music generation
             presented at: ["Simple and Controllable Music Generation"](https://huggingface.co/papers/2306.05284)
             """
@@ -149,26 +200,46 @@ def ui(**kwargs):
                         minimum=1,
                         maximum=30,
                         value=10,
-                        label="Duration",
+                        label="Total Duration",
                         interactive=True,
                     )
                 with gr.Row():
-                    continuation = gr.Slider(
+                    continuation = gr.Checkbox(value=False, label="Enable Continuation")
+                with gr.Row():
+                    continuation_start = gr.Slider(
                         minimum=0,
                         maximum=30,
+                        step=0.01,
                         value=0,
-                        label="Continue from the end duration",
+                        label="melody cut start",
                         interactive=True,
                     )
+                    continuation_end = gr.Slider(
+                        minimum=0,
+                        maximum=30,
+                        step=0.01,
+                        value=0,
+                        label="melody cut end",
+                        interactive=True,
+                    )
+                    cut_btn = gr.Button("Cut Melody").style(full_width=False)
                 with gr.Row():
-                    topk = gr.Number(label="Top-k", value=250, interactive=True)
-                    topp = gr.Number(label="Top-p", value=0, interactive=True)
-                    temperature = gr.Number(
-                        label="Temperature", value=1.0, interactive=True
+                    preview_cut = gr.Audio(
+                        type="numpy",
+                        label="Cut Preview",
                     )
-                    cfg_coef = gr.Number(
-                        label="Classifier Free Guidance", value=3.0, interactive=True
-                    )
+                with gr.Accordion(label="Advanced Settings", open=False):
+                    with gr.Row():
+                        topk = gr.Number(label="Top-k", value=250, interactive=True)
+                        topp = gr.Number(label="Top-p", value=0, interactive=True)
+                        temperature = gr.Number(
+                            label="Temperature", value=1.0, interactive=True
+                        )
+                        cfg_coef = gr.Number(
+                            label="Classifier Free Guidance",
+                            value=3.0,
+                            interactive=True,
+                        )
             with gr.Column():
                 output = gr.Video(label="Generated Music", elem_id="generated-video")
                 output_melody = gr.Audio(label="Melody ", elem_id="melody-output")
@@ -180,6 +251,19 @@ def ui(**kwargs):
                             "Share to community", elem_id="share-btn"
                         )
                         share_button.click(None, [], [], _js=share_js)
+        melody.change(
+            check_melody_length,
+            melody,
+            [continuation_start, continuation_end],
+            queue=False,
+        )
+        cut_btn.click(
+            preview_melody_cut,
+            [melody, continuation_start, continuation_end],
+            preview_cut,
+            queue=False,
+        )
+
         submit.click(
             lambda x: gr.update(visible=False),
             None,
@@ -193,6 +277,8 @@ def ui(**kwargs):
                 melody,
                 duration,
                 continuation,
+                continuation_start,
+                continuation_end,
                 topk,
                 topp,
                 temperature,
@@ -207,7 +293,7 @@ def ui(**kwargs):
             show_progress=False,
         )
         radio.change(toggle, radio, [melody], queue=False, show_progress=False)
-        gr.Examples(
+        examples = gr.Examples(
             fn=predict,
             examples=[
                 [
@@ -218,7 +304,7 @@ def ui(**kwargs):
                     "A cheerful country song with acoustic guitars",
                     "./assets/bolero_ravel.mp3",
                 ],
-                ["90s rock song with electric guitar and heavy drums", None, "medium"],
+                ["90s rock song with electric guitar and heavy drums", None],
                 [
                     "a light and cheerly EDM track, with syncopated drums, aery pads, and strong emotions",
                     "./assets/bach.mp3",

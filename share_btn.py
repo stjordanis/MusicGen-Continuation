@@ -106,6 +106,8 @@ ${generatedURL}
 ${(melodyURL && (typeof melodyURL === 'string'))? `
 ### Melody
 <audio controls src="${melodyURL}"></audio>` : ``}
+
+<small>made with continuation: https://huggingface.co/spaces/radames/MusicGen-Continuation</small>
 `;
     const params = new URLSearchParams({
         title: titleTxt,
