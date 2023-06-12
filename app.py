@@ -105,7 +105,7 @@ def predict(
 
     return (
         waveform_video,
-        (sr, melody_wavform.numpy()) if melody_input else None,
+        (sr, melody_wavform.unsqueeze(0).numpy()) if melody_input else None,
     )
 
 
@@ -144,7 +144,7 @@ def ui(**kwargs):
             ..., int(sr * continuation_start) : int(sr * continuation_end)
         ]
 
-        return (sr, prompt_waveform.numpy())
+        return (sr, prompt_waveform.unsqueeze(0).numpy())
 
     with gr.Blocks(css=css) as interface:
         gr.Markdown(
