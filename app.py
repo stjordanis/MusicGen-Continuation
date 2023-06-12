@@ -108,7 +108,7 @@ def ui(**kwargs):
                 """
                 ⚠ This Space doesn't work in this shared UI ⚠
 
-                <a href="https://huggingface.co/spaces/musicgen/MusicGen?duplicate=true" style="display: inline-block;margin-top: .5em;margin-right: .25em;" target="_blank">
+                <a href="https://huggingface.co/spaces/radames/MusicGen-Continuation?duplicate=true" style="display: inline-block;margin-top: .5em;margin-right: .25em;" target="_blank">
                 <img style="margin-bottom: 0em;display: inline;margin-top: -.25em;" src="https://bit.ly/3gLdBN6" alt="Duplicate Space"></a>
                 to use it privately, or use the <a href="https://huggingface.co/spaces/facebook/MusicGen">public demo</a>
                 """
